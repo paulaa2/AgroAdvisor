@@ -1,0 +1,22 @@
+Licensor=Denodo Technologies
+Licensee=Individual;support@denodo.com;DTUS-TL-DE-260014-047-SA-EXP
+GenerationDate=202511271356EST
+Expiration=2027-03-01
+VDP/ProductName=Virtual DataPort 9.0
+VDP/MaxSimultaneousRequests=3
+VDP/MaxRowsPerQuery=10000
+VDP/SourceTypes[0]=SAPBW, SAPBWBAPI, CUSTOM, ARN, GS, ITP
+VDP/MaxSources[0]=0
+VDP/ODBCAdapters=excel, access
+VDP/DenodoBrowserAllowed=false
+VDP/ViewParametersAllowed=false
+VDP/ExtensionsAllowed=false
+VDP/JMSListenersAllowed=false
+VDP/VCSAllowed=false
+VDP/DataCatalogAiSdkEndpointsAllowed=true
+Scheduler/ProductName=Scheduler 9.0
+Scheduler/MaxJobs=1
+Common/ProductName=Common 9.0
+Common/ExpressLicense=true
+
+Signature=302D02140F6D3087CAF09010267542882A30A38A10A3079F0215008EB43C760BB1348FD91624FDADD721A5B0C80D4B
