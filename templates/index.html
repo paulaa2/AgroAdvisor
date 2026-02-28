@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AgroAdvisor</title>
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+</head>
+<body>
+
+<!-- Sidebar -->
+<aside class="sidebar" id="sidebar">
+  <div class="sidebar-header">
+    <div class="logo">
+      <div class="logo-mark">
+        <svg width="28" height="28" viewBox="0 0 32 32" fill="none">
+          <rect width="32" height="32" rx="8" fill="rgba(255,255,255,.15)"/>
+          <path d="M16 6L8 26h4l2-5h4l2 5h4L16 6zm0 8l2.5 6h-5L16 14z" fill="#fff"/>
+        </svg>
+      </div>
+      <div class="logo-text">
+        <span class="logo-name">AgroAdvisor</span>
+        <span class="logo-tag">Intelligence Platform</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="sidebar-section">
+    <span class="sidebar-label">Principal</span>
+    <nav class="nav-list">
+      <button class="nav-item" data-panel="dashboard" onclick="showPanel('dashboard')">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+        <span>Dashboard</span>
+      </button>
+      <button class="nav-item active" data-panel="consult" onclick="showPanel('consult')">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+        <span>Consulta Libre</span>
+      </button>
+    </nav>
+  </div>
+
+  <div class="sidebar-section">
+    <span class="sidebar-label">Analisis</span>
+    <nav class="nav-list">
+      <button class="nav-item" data-panel="crop" onclick="showPanel('crop')">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+        <span>Asesor de Cultivos</span>
+      </button>
+      <button class="nav-item" data-panel="pesticide" onclick="showPanel('pesticide')">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
+        <span>Pesticidas</span>
+      </button>
+      <button class="nav-item" data-panel="climate" onclick="showPanel('climate')">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>
+        <span>Impacto Climatico</span>
+      </button>
+      <button class="nav-item" data-panel="market" onclick="showPanel('market')">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+        <span>Mercado</span>
+      </button>
+      <button class="nav-item" data-panel="regional" onclick="showPanel('regional')">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+        <span>Informe Regional</span>
+      </button>
+    </nav>
+  </div>
+
+  <div class="sidebar-bottom">
+    <button class="sync-btn" onclick="syncMetadata()">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+      <span>Sincronizar metadatos</span>
+    </button>
+    <div class="sidebar-credit">
+      <span>Powered by</span>
+      <strong>Denodo AI SDK</strong>
+    </div>
+  </div>
+</aside>
+
+<!-- Mobile toggle -->
+<button class="mobile-toggle" onclick="document.getElementById('sidebar').classList.toggle('open')">
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+</button>
+
+<!-- Main -->
+<main class="main">
+
+  <!-- DASHBOARD -->
+  <section class="panel" id="panel-dashboard">
+    <div class="panel-top">
+      <h2 class="panel-title">Dashboard</h2>
+      <p class="panel-desc">Centro de inteligencia agricola</p>
+    </div>
+    <h3 class="section-heading">Analisis disponibles</h3>
+    <div class="card-grid">
+      <div class="action-card" onclick="showPanel('consult')"><div class="ac-icon ac-teal"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></div><div class="ac-body"><h4>Pregunta abierta</h4><p>Consulta cualquier dato agricola con lenguaje natural.</p></div><svg class="ac-arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg></div>
+      <div class="action-card" onclick="showPanel('crop')"><div class="ac-icon ac-green"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></div><div class="ac-body"><h4>Que plantar</h4><p>Recomendaciones de cultivo por clima, suelo y mercado.</p></div><svg class="ac-arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg></div>
+      <div class="action-card" onclick="showPanel('pesticide')"><div class="ac-icon ac-orange"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg></div><div class="ac-body"><h4>Optimizar pesticidas</h4><p>Eficiencia, umbrales y rendimiento por tonelada.</p></div><svg class="ac-arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg></div>
+      <div class="action-card" onclick="showPanel('climate')"><div class="ac-icon ac-red"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2"/></svg></div><div class="ac-body"><h4>Riesgo climatico</h4><p>Impacto de temperatura y lluvia en los rendimientos.</p></div><svg class="ac-arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg></div>
+      <div class="action-card" onclick="showPanel('market')"><div class="ac-icon ac-blue"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg></div><div class="ac-body"><h4>Inteligencia de mercado</h4><p>Precios de commodities y oportunidades comerciales.</p></div><svg class="ac-arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg></div>
+      <div class="action-card" onclick="showPanel('regional')"><div class="ac-icon ac-purple"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg></div><div class="ac-body"><h4>Perfil de pais</h4><p>Informe integral: rendimiento, clima, pesticidas, mercado.</p></div><svg class="ac-arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg></div>
+    </div>
+  </section>
+
+  <!-- CONSULTA LIBRE -->
+  <section class="panel active" id="panel-consult">
+    <div class="panel-top">
+      <h2 class="panel-title">Consulta Libre</h2>
+      <p class="panel-desc">Pregunta sobre rendimientos, clima, precios o cualquier dato agricola</p>
+    </div>
+    <div class="chat-wrap">
+      <div class="chat-messages" id="chat-messages">
+        <div class="msg bot">
+          <div class="avatar av-bot"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg></div>
+          <div class="bubble">Soy <strong>AgroAdvisor</strong>. Puedo analizar rendimientos, pesticidas, clima, precios y recomendaciones de cultivo de mas de 100 paises. Preguntame lo que necesites.</div>
+        </div>
+      </div>
+      <form class="chat-bar" onsubmit="event.preventDefault();sendChat()">
+        <div class="chat-bar-top">
+          <div class="mode-toggle" id="mode-toggle">
+            <button type="button" class="mode-btn active" data-mode="pipeline" onclick="setChatMode('pipeline')">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="5" r="3"/><circle cx="12" cy="19" r="3"/><line x1="12" y1="8" x2="12" y2="16"/></svg>
+              Pipeline
+            </button>
+            <button type="button" class="mode-btn" data-mode="deep" onclick="setChatMode('deep')">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
+              DeepQuery
+            </button>
+          </div>
+        </div>
+        <div class="chat-bar-input">
+          <textarea id="chat-input" placeholder="Escribe tu consulta..." rows="1"
+                    onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendChat()}"
+                    oninput="this.style.height='auto';this.style.height=Math.min(this.scrollHeight,120)+'px'"></textarea>
+          <button type="submit" class="send-btn" title="Enviar">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+          </button>
+        </div>
+      </form>
+    </div>
+  </section>
+
+  <!-- CROP ADVISOR -->
+  <section class="panel" id="panel-crop">
+    <div class="panel-top"><h2 class="panel-title">Asesor de Cultivos</h2><p class="panel-desc">Recomendaciones basadas en clima, suelo y rentabilidad de mercado</p></div>
+    <div class="form-card">
+      <div class="form-grid">
+        <div class="field"><label for="crop-area">Pais / Region</label><input id="crop-area" type="text" placeholder="Ej: India, Brazil, Spain..."></div>
+        <div class="field field-wide"><label for="crop-conditions">Condiciones (opcional)</label><input id="crop-conditions" type="text" placeholder="Ej: 25C, 900mm lluvia, suelo acido..."></div>
+      </div>
+      <button class="btn-primary" onclick="runCropAdvisor()">Ejecutar analisis</button>
+    </div>
+    <div class="results" id="crop-results"></div>
+  </section>
+
+  <!-- PESTICIDE -->
+  <section class="panel" id="panel-pesticide">
+    <div class="panel-top"><h2 class="panel-title">Analisis de Pesticidas</h2><p class="panel-desc">Optimiza la inversion y detecta rendimientos decrecientes</p></div>
+    <div class="form-card">
+      <div class="form-grid"><div class="field"><label for="pest-area">Pais / Region (opcional)</label><input id="pest-area" type="text" placeholder="Vacio = analisis global"></div></div>
+      <button class="btn-primary" onclick="runPesticideAnalysis()">Ejecutar analisis</button>
+    </div>
+    <div class="results" id="pesticide-results"></div>
+  </section>
+
+  <!-- CLIMATE -->
+  <section class="panel" id="panel-climate">
+    <div class="panel-top"><h2 class="panel-title">Impacto Climatico</h2><p class="panel-desc">Correlacion entre temperatura, lluvia y rendimiento agricola</p></div>
+    <div class="form-card">
+      <div class="form-grid"><div class="field"><label for="climate-area">Pais / Region (opcional)</label><input id="climate-area" type="text" placeholder="Vacio = analisis global"></div></div>
+      <button class="btn-primary" onclick="runClimateImpact()">Ejecutar analisis</button>
+    </div>
+    <div class="results" id="climate-results"></div>
+  </section>
+
+  <!-- MARKET -->
+  <section class="panel" id="panel-market">
+    <div class="panel-top"><h2 class="panel-title">Inteligencia de Mercado</h2><p class="panel-desc">Evolucion de precios de commodities y decisiones de inversion</p></div>
+    <div class="form-card"><button class="btn-primary" onclick="runMarketIntelligence()">Analizar mercado global</button></div>
+    <div class="results" id="market-results"></div>
+  </section>
+
+  <!-- REGIONAL -->
+  <section class="panel" id="panel-regional">
+    <div class="panel-top"><h2 class="panel-title">Informe Regional</h2><p class="panel-desc">Diagnostico completo: cultivos, clima, pesticidas y oportunidades</p></div>
+    <div class="form-card">
+      <div class="form-grid"><div class="field"><label for="region-area">Pais / Region *</label><input id="region-area" type="text" placeholder="Ej: India, Albania, Brazil..." required></div></div>
+      <button class="btn-primary" onclick="runRegionalReport()">Generar informe</button>
+    </div>
+    <div class="results" id="regional-results"></div>
+  </section>
+
+</main>
+
+<script src="/static/main.js"></script>
+</body>
+</html>
