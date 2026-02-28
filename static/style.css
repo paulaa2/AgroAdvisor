@@ -424,6 +424,7 @@ body {
   border: 2px solid var(--primary-500);
   background: #fff;
 }
+.pipeline-step.phase-0::before { background: #faf5ff; border-color: #8b5cf6; }
 .pipeline-step.phase-1::before { background: var(--blue-bg); border-color: var(--blue); }
 .pipeline-step.phase-2::before { background: var(--primary-100); border-color: var(--primary-600); }
 .pipeline-step .step-head {
@@ -433,6 +434,7 @@ body {
   font-size: .65rem; font-weight: 700; padding: 1px 7px;
   border-radius: 4px; text-transform: uppercase; letter-spacing: .04em;
 }
+.step-phase.sp-0 { background: #faf5ff; color: #8b5cf6; }
 .step-phase.sp-1 { background: var(--blue-bg); color: var(--blue); }
 .step-phase.sp-2 { background: var(--primary-100); color: var(--primary-700); }
 .pipeline-step .step-name { font-size: .82rem; font-weight: 600; color: var(--n-800); }

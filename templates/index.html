@@ -135,8 +135,7 @@
         </div>
         <div class="chat-bar-input">
           <textarea id="chat-input" placeholder="Escribe tu consulta..." rows="1"
-                    onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendChat()}"
-                    oninput="this.style.height='auto';this.style.height=Math.min(this.scrollHeight,120)+'px'"></textarea>
+                    onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendChat()}"></textarea>
           <button type="submit" class="send-btn" title="Enviar">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
           </button>
@@ -197,6 +196,9 @@
 
 </main>
 
+<script src="/static/render.js"></script>
+<script src="/static/api.js"></script>
+<script src="/static/chat.js"></script>
 <script src="/static/main.js"></script>
 </body>
 </html>
