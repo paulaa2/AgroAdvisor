@@ -1,293 +1,139 @@
-"""
-AgroAdvisor – Query Pipeline
-Three-phase reasoning pipeline:
-  Phase 0 — VectorDB semantic search + local TABLE_CATALOGUE keyword ranking
-  Phase 1 — Focused schema discovery for top-ranked tables; explicit table selection
-  Phase 2 — Data extraction against the selected table(s) only
+"""AgroAdvisor - Query Pipeline.
+
+Three-phase reasoning:
+  Phase 0 - VectorDB semantic search + local table ranking
+  Phase 1 - Focused schema discovery for top tables
+  Phase 2 - SQL data extraction
+  Phase 3 - Thinking LLM interpretation (recommend action, then justify with data)
 """
 
 import asyncio
+import json
 import time
 from typing import Any
 
 from .config import DEEP_QUERY_URL, TABLE_CATALOGUE, TIMEOUT_DEEP
 from .prompts import SYSTEM_INSTRUCTIONS
-from .sdk_client import ask, ask_metadata, discover_schema, sdk_post, vector_search, think_interpret
-from .utils import count_rows, extract_chart_data, get_sql, log
+from .sdk_client import ask, discover_schema, sdk_post, vector_search, think_interpret
+from .utils import count_rows, extract_data, get_sql, log
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Phase entry builders
-# ─────────────────────────────────────────────────────────────────────────────
+# ---- Phase entry builders ----
 
-def _phase0_entry(
-    vector_context: str,
-    ranked_tables: list[dict],
-    duration_s: float,
-) -> dict:
-    """Phase 0: VectorDB search + local table ranking."""
-    top_names = [t["name"] for t in ranked_tables[:3] if t["score"] > 0]
-    return {
-        "phase": 0,
-        "name": "Busqueda semantica + Ranking de tablas",
-        "description": (
-            "VectorDB embeddings (ChromaDB + gemini-embedding-001) "
-            "+ scoring local sobre catalogo de tablas"
-        ),
-        "endpoint": "answerMetadataQuestion (embeddings)",
-        "ranked_tables": ranked_tables,
-        "result_summary": (
-            f"Tablas mas relevantes: {', '.join(top_names)}\n"
-            + (vector_context[:300] if vector_context else "Sin resultados VectorDB")
-        ),
-        "duration_s": round(duration_s, 1),
-    }
+def _phase_entry(phase: int, name: str, endpoint: str, duration: float, **extra) -> dict:
+    entry = {"phase": phase, "name": name, "endpoint": endpoint, "duration_s": round(duration, 1)}
+    entry.update(extra)
+    return entry
 
 
-def _phase1_entry(
-    selected_tables: list[str],
-    schema_context: str,
-    duration_s: float,
-) -> dict:
-    """Phase 1: Focused schema discovery + explicit table selection."""
-    return {
-        "phase": 1,
-        "name": "Seleccion de tabla",
-        "description": (
-            f"Esquema descubierto para: {', '.join(selected_tables) or 'ninguna'}. "
-            "Solo se consultan las tablas necesarias."
-        ),
-        "endpoint": "answerMetadataQuestion (focused)",
-        "selected_tables": selected_tables,
-        "result_summary": schema_context[:600] if schema_context else "Esquema local (sin Data Catalog)",
-        "duration_s": round(duration_s, 1),
-    }
-
-
-def _phase2_entry(label: str, result: dict, duration_s: float) -> dict:
-    return {
-        "phase": 2,
-        "name": f"Consulta: {label}",
-        "endpoint": "answerDataQuestion",
-        "sql_query": get_sql(result),
-        "rows_returned": count_rows(result),
-        "duration_s": round(duration_s, 1),
-    }
-
-
-def _phase2_error_entry(label: str, error: str, duration_s: float) -> dict:
-    return {
-        "phase": 2,
-        "name": f"Consulta: {label}",
-        "endpoint": "answerDataQuestion",
-        "error": error,
-        "duration_s": round(duration_s, 1),
-    }
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Local table scoring (Phase 0 — no network call needed)
-# ─────────────────────────────────────────────────────────────────────────────
+# ---- Table scoring (Phase 0) ----
 
 def _score_tables(question: str) -> list[dict]:
-    """
-    Score every entry in TABLE_CATALOGUE against the user question using
-    keyword overlap, column-name hits and description word overlap.
-    Returns a sorted list of {name, score, description, denodo} dicts.
-    """
     q = question.lower()
-    results: list[dict] = []
-
+    results = []
     for name, info in TABLE_CATALOGUE.items():
-        score = 0.0
-
-        # Keyword hits (strongest signal)
-        for kw in info.get("keywords", []):
-            if kw.lower() in q:
-                score += 1.0
-
-        # Column-name hits (medium signal)
-        for col in info.get("columns", "").lower().split(", "):
-            col = col.strip()
-            if col and col in q:
-                score += 0.5
-
-        # Description word overlap (weak signal)
+        score = sum(1.0 for kw in info.get("keywords", []) if kw.lower() in q)
+        score += sum(0.5 for col in info.get("columns", "").lower().split(", ") if col.strip() and col.strip() in q)
         desc_words = [w for w in info.get("description", "").lower().split() if len(w) > 4]
-        for w in desc_words:
-            if w in q:
-                score += 0.2
-
-        # Denodo-queryable tables get a small boost (prefer directly queryable)
+        score += sum(0.2 for w in desc_words if w in q)
         if info.get("denodo"):
             score += 0.1
-
         results.append({
-            "name": name,
-            "score": round(score, 2),
+            "name": name, "score": round(score, 2),
             "description": info["description"],
             "denodo": info.get("denodo", False),
             "join_keys": info.get("join_keys", ""),
             "use_for": info.get("use_for", ""),
         })
-
     results.sort(key=lambda x: x["score"], reverse=True)
     return results
 
 
-def _build_table_context(selected_tables: list[str]) -> str:
-    """
-    Build a concise schema context string from TABLE_CATALOGUE
-    for the selected tables, used as extra instructions in Phase 2.
-    """
-    parts: list[str] = []
-    for name in selected_tables:
+def _build_table_context(tables: list[str]) -> str:
+    parts = []
+    for name in tables:
         info = TABLE_CATALOGUE.get(name)
         if not info:
             continue
+        queryable = "YES" if info.get("denodo") else "NO (local CSV)"
         parts.append(
             f"TABLE: {name}\n"
-            f"  Description: {info['description']}\n"
-            f"  Columns:     {info['columns']}\n"
-            f"  Join keys:   {info['join_keys']}\n"
-            f"  Use for:     {info['use_for']}\n"
-            f"  Queryable via Denodo: {'YES' if info.get('denodo') else 'NO (local CSV)'}"
+            f"  Columns: {info['columns']}\n"
+            f"  Use for: {info['use_for']}\n"
+            f"  Queryable: {queryable}"
         )
     return "\n\n".join(parts)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Core phase runner
-# ─────────────────────────────────────────────────────────────────────────────
+# ---- Core phases ----
 
-async def _run_phases(
-    user_question: str,
-    metadata_topic: str,
-) -> tuple[str, str, list[str], dict, dict]:
-    """
-    Execute Phase 0 (VectorDB + local ranking) and Phase 1 (focused schema
-    for selected tables) in sequence.
+async def _run_phases(user_question: str, metadata_topic: str):
+    """Run Phase 0 + Phase 1. Returns (vector_ctx, schema_ctx, selected_tables, p0, p1)."""
 
-    Returns:
-      (vector_context, schema_context, selected_tables, phase0_entry, phase1_entry)
-
-    Both phases are non-blocking — failures degrade gracefully.
-    """
-    # ── Phase 0: VectorDB + local ranking ─────────────────────────────────────
-    log(f"PIPELINE PHASE 0 — VectorDB + table ranking: {user_question[:100]}")
+    # Phase 0: VectorDB + table ranking
+    log(f"PHASE 0 - VectorDB + ranking: {user_question[:100]}")
     t0 = time.time()
-
     vector_context = ""
     try:
         vector_context = await vector_search(user_question)
     except Exception as exc:
-        log(f"PHASE 0 VectorDB failed (non-blocking): {exc}")
+        log(f"PHASE 0 VectorDB failed: {exc}")
 
     ranked = _score_tables(user_question)
-    ranked_tables = ranked  # full list for the phase entry
+    top_names = [t["name"] for t in ranked[:3] if t["score"] > 0]
+    p0 = _phase_entry(0, "Busqueda semantica + Ranking", "answerMetadataQuestion",
+                       time.time() - t0, ranked_tables=ranked,
+                       result_summary=f"Top: {', '.join(top_names)}")
 
-    phase0_time = time.time() - t0
-    p0 = _phase0_entry(vector_context, ranked_tables, phase0_time)
-    log(
-        f"PHASE 0 complete ({phase0_time:.1f}s) | "
-        f"top tables: {[t['name'] for t in ranked[:3]]}"
-    )
+    # Phase 1: Schema discovery
+    denodo_top = [t for t in ranked if t["denodo"] and t["score"] > 0]
+    any_top = [t for t in ranked if t["score"] > 0]
+    selected = [t["name"] for t in (denodo_top or any_top)[:2]] or ([ranked[0]["name"]] if ranked else [])
 
-    # ── Phase 1: Focused schema for top-ranked Denodo tables ──────────────────
-    # Pick Denodo-queryable tables with score > 0 first, then any table
-    denodo_candidates = [t for t in ranked if t["denodo"] and t["score"] > 0]
-    any_candidates = [t for t in ranked if t["score"] > 0]
-
-    # Prefer Denodo tables; for edge cases fall back to the top-scored table
-    if denodo_candidates:
-        top_for_schema = [t["name"] for t in denodo_candidates[:2]]
-    elif any_candidates:
-        top_for_schema = [t["name"] for t in any_candidates[:2]]
-    else:
-        top_for_schema = [ranked[0]["name"]] if ranked else []
-
-    log(f"PIPELINE PHASE 1 — Focused schema for: {top_for_schema}")
+    log(f"PHASE 1 - Schema for: {selected}")
     t1 = time.time()
     schema_context = ""
-    selected_tables: list[str] = []
-
     try:
-        focused_topic = (
-            f"Exact schema (views, columns, data types) for: {', '.join(top_for_schema)}. "
-            f"Context: {metadata_topic}"
-        )
-        meta = await discover_schema(focused_topic)
+        meta = await discover_schema(f"Schema for: {', '.join(selected)}. Context: {metadata_topic}")
         schema_context = str(meta.get("answer", ""))
-        selected_tables = top_for_schema
     except Exception as exc:
-        log(f"PHASE 1 schema discovery failed (non-blocking): {exc}")
-        selected_tables = top_for_schema  # still pass the selection even if schema fails
+        log(f"PHASE 1 failed: {exc}")
 
-    # Enrich schema_context with local TABLE_CATALOGUE info
-    local_ctx = _build_table_context(selected_tables)
+    local_ctx = _build_table_context(selected)
     if local_ctx:
-        schema_context = local_ctx + (
-            ("\n\nDATA CATALOG SCHEMA:\n" + schema_context) if schema_context else ""
-        )
+        schema_context = local_ctx + ("\n\n" + schema_context if schema_context else "")
 
-    phase1_time = time.time() - t1
-    p1 = _phase1_entry(selected_tables, schema_context, phase1_time)
-    log(
-        f"PHASE 1 complete ({phase1_time:.1f}s) | "
-        f"selected: {selected_tables} | schema_chars={len(schema_context)}"
-    )
+    p1 = _phase_entry(1, "Seleccion de tabla", "answerMetadataQuestion",
+                       time.time() - t1, selected_tables=selected,
+                       result_summary=schema_context[:600] if schema_context else "Local schema only")
 
-    return vector_context, schema_context, selected_tables, p0, p1
+    log(f"PHASE 0+1 done | selected={selected} | schema={len(schema_context)} chars")
+    return vector_context, schema_context, selected, p0, p1
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Enriched instructions builder
-# ─────────────────────────────────────────────────────────────────────────────
-
-def _build_enriched_instructions(
-    vector_context: str,
-    schema_context: str,
-    selected_tables: list[str],
-    extra: str = "",
-) -> str:
-    """
-    Combine Phase 0/1 context into a single instruction block for Phase 2.
-    Emphasises which table(s) to query and guards against common Denodo pitfalls.
-    """
-    parts: list[str] = []
-
-    if vector_context:
-        parts.append(
-            "PHASE 0 — VECTORDB SEMANTIC CONTEXT:\n" + vector_context[:1200]
-        )
-
-    if schema_context:
-        parts.append(
-            "PHASE 1 — SELECTED TABLE SCHEMA:\n" + schema_context
-        )
-
-    if selected_tables:
-        denodo_sel = [t for t in selected_tables if TABLE_CATALOGUE.get(t, {}).get("denodo")]
-        if denodo_sel:
-            parts.append(
-                f"FOCUS: query the following Denodo view(s): {', '.join(denodo_sel)}. "
-                "Do NOT query other views unless strictly necessary."
-            )
-
+def _build_instructions(vector_ctx: str, schema_ctx: str, tables: list[str], extra: str = "") -> str:
+    """Build Phase 2 instruction block from prior phases."""
+    parts = []
+    if vector_ctx:
+        parts.append(f"VECTORDB CONTEXT:\n{vector_ctx[:1200]}")
+    if schema_ctx:
+        parts.append(f"TABLE SCHEMA:\n{schema_ctx}")
+    denodo_tables = [t for t in tables if TABLE_CATALOGUE.get(t, {}).get("denodo")]
+    if denodo_tables:
+        parts.append(f"FOCUS: query {', '.join(denodo_tables)}. Do NOT query other views unless necessary.")
+    parts.append('The yield column is "hg_ha_yield" (numeric, no CAST needed).')
     parts.append(
-        'OVERRIDE: The yield column is ALWAYS "hg_ha_yield". '
-        "Do NOT use CAST on hg_ha_yield — it is already numeric."
+        "PHASE 2 ROLE: Generate correct SQL and execute it.\n"
+        "- NEVER use LIMIT 1. At least 10-20 rows for comparisons, ALL years for trends.\n"
+        "- Use GROUP BY + ORDER BY for rankings/trends.\n"
+        "- Format results as Markdown table. No analysis - just data."
     )
-
     if extra:
         parts.append(extra)
-
     return "\n\n".join(parts)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Public pipeline functions
-# ─────────────────────────────────────────────────────────────────────────────
+# ---- Public pipelines ----
 
 async def two_phase_query(
     user_question: str,
@@ -295,88 +141,54 @@ async def two_phase_query(
     data_question: str,
     extra_instructions: str = "",
 ) -> dict:
-    """
-    Three-phase pipeline for a single data question.
-    Returns: {**data_result, "pipeline": {phases, total_duration_s}}
-    """
+    """Single-question pipeline: Phase 0+1+2+3."""
     pipeline: dict[str, Any] = {"phases": []}
     t_total = time.time()
+    log(f"{'='*60}\nPIPELINE: {user_question[:100]}")
 
-    log("=" * 60)
-    log(f"TWO-PHASE PIPELINE: {user_question[:100]}")
-
-    vector_context, schema_context, selected_tables, p0, p1 = await _run_phases(
-        user_question, metadata_topic
-    )
+    vector_ctx, schema_ctx, tables, p0, p1 = await _run_phases(user_question, metadata_topic)
     pipeline["phases"].extend([p0, p1])
 
-    log(f"PIPELINE PHASE 2 — Data query / SQL (tables: {selected_tables}): {data_question[:120]}")
-    enriched = _build_enriched_instructions(
-        vector_context, schema_context, selected_tables, extra_instructions
-    )
-    # Tell the LLM to focus on accurate SQL + clean data return; interpretation is Phase 3
-    enriched += (
-        "\n\nPHASE 2 ROLE: Your ONLY job is to generate the correct SQL query and execute it. "
-        "CRITICAL RULES FOR DATA RETURN:\n"
-        "- NEVER use LIMIT 1. Always return at least 5-10 rows for comparison/trends.\n"
-        "- Use GROUP BY + ORDER BY to show rankings, trends over years, or multi-crop/country comparisons.\n"
-        "- If the user asks 'which is best,' show the TOP 5 so we can compare, not just the winner.\n"
-        "- If the user asks about a single crop/area, show its trend over multiple years.\n"
-        "- ALWAYS format the results as a Markdown table with headers, separator row, and data rows.\n"
-        "Example format:\n"
-        "| area | year | hg_ha_yield |\n"
-        "| --- | --- | --- |\n"
-        "| Brazil | 2018 | 11000 |\n"
-        "| Brazil | 2019 | 11500 |\n"
-        "| Brazil | 2020 | 12345 |\n\n"
-        "Do NOT provide analysis, recommendations or narrative — just the table."
-    )
+    # Phase 2: SQL query
+    log(f"PHASE 2 - SQL query: {data_question[:120]}")
+    instructions = _build_instructions(vector_ctx, schema_ctx, tables, extra_instructions)
     t2 = time.time()
-    data_result = await ask(data_question, enriched)
+    data_result = await ask(data_question, instructions)
     phase2_time = time.time() - t2
-    pipeline["phases"].append(_phase2_entry(data_question[:60], data_result, phase2_time))
+    pipeline["phases"].append(_phase_entry(
+        2, data_question[:60], "answerDataQuestion", phase2_time,
+        sql_query=get_sql(data_result), rows_returned=count_rows(data_result),
+    ))
 
-    # ── Extract structured data BEFORE Phase 3 overwrites the answer ──────────
-    chart_rows = extract_chart_data(data_result)
-    log(f"CHART DATA extracted: {len(chart_rows)} rows")
-    if chart_rows:
-        log(f"CHART DATA keys: {list(chart_rows[0].keys())}")
-        log(f"CHART DATA row 0: {chart_rows[0]}")
+    # Extract structured data before Phase 3 overwrites the answer
+    rows = extract_data(data_result)
+    log(f"Extracted {len(rows)} data rows")
 
-    # ── Phase 3: Thinking LLM deep interpretation ──────────────────────────────
-    log("PIPELINE PHASE 3 — Thinking LLM interpretation")
+    # Phase 3: Thinking LLM interpretation
+    log("PHASE 3 - Thinking LLM")
     t3 = time.time()
     raw_answer = str(data_result.get("answer", ""))
+    structured = ""
+    if rows:
+        structured = f"\nSTRUCTURED DATA:\n{json.dumps(rows[:30], indent=2, ensure_ascii=False)}"
 
-    # Append structured JSON for deeper reasoning
-    structured_data = ""
-    if chart_rows:
-        import json
-        structured_data = "\nSTRUCTURED SQL RESULTS:\n"
-        structured_data += json.dumps(chart_rows[:30], indent=2, ensure_ascii=False)
-
-    sql_used = str(data_result.get("sql_query") or data_result.get("sqlQuery") or data_result.get("sql") or "")
     final_answer = await think_interpret(
         question=user_question,
-        raw_data=raw_answer + structured_data,
-        sql=sql_used,
-        schema_context=schema_context,
+        raw_data=raw_answer + structured,
+        sql=get_sql(data_result),
+        schema_context=schema_ctx,
     )
-    phase3_time = time.time() - t3
 
-    total_time = time.time() - t_total
-    pipeline["total_duration_s"] = round(total_time, 1)
-    log(f"TWO-PHASE PIPELINE COMPLETE ({total_time:.1f}s)")
-    log("=" * 60)
+    total = time.time() - t_total
+    pipeline["total_duration_s"] = round(total, 1)
+    log(f"PIPELINE COMPLETE ({total:.1f}s)\n{'='*60}")
 
-    # Build clean response — put chart rows in 'data' so frontend gets them directly
-    resp = {
+    return {
         "answer": final_answer,
-        "sql_query": sql_used,
-        "data": chart_rows,
+        "sql_query": get_sql(data_result),
+        "data": rows,
         "pipeline": pipeline,
     }
-    return resp
 
 
 async def multi_phase_query(
@@ -385,125 +197,83 @@ async def multi_phase_query(
     data_queries: list[dict],
     extra_instructions: str = "",
 ) -> dict:
-    """
-    Three-phase pipeline for multiple concurrent data questions.
-    Each entry in data_queries: {"question": str, "label": str}
-    Returns: {"results": [...], "pipeline": {...}}
-    """
+    """Multi-question pipeline: shared Phase 0+1, concurrent Phase 2, parallel Phase 3."""
     pipeline: dict[str, Any] = {"phases": []}
     t_total = time.time()
+    log(f"{'='*60}\nMULTI-PIPELINE: {user_question[:100]}")
 
-    log("=" * 60)
-    log(f"MULTI-PHASE PIPELINE: {user_question[:100]}")
-
-    vector_context, schema_context, selected_tables, p0, p1 = await _run_phases(
-        user_question, metadata_topic
-    )
+    vector_ctx, schema_ctx, tables, p0, p1 = await _run_phases(user_question, metadata_topic)
     pipeline["phases"].extend([p0, p1])
 
-    log(
-        f"PIPELINE PHASE 2 — {len(data_queries)} concurrent queries "
-        f"(tables: {selected_tables})"
-    )
-    enriched = _build_enriched_instructions(
-        vector_context, schema_context, selected_tables, extra_instructions
-    )
-    # Phase 2 role: SQL generation + data retrieval only
-    enriched += (
-        "\n\nPHASE 2 ROLE: Your ONLY job is to generate the correct SQL query and execute it. "
-        "CRITICAL RULES FOR DATA RETURN:\n"
-        "- NEVER use LIMIT 1. Always return at least 5-10 rows for comparison/trends.\n"
-        "- Use GROUP BY + ORDER BY to show rankings, trends over years, or multi-crop/country comparisons.\n"
-        "- If the user asks 'which is best,' show the TOP 5 so we can compare, not just the winner.\n"
-        "- ALWAYS format the results as a Markdown table with headers, separator row, and data rows.\n"
-        "Example format:\n"
-        "| area | year | hg_ha_yield |\n"
-        "| --- | --- | --- |\n"
-        "| Brazil | 2018 | 11000 |\n"
-        "| Brazil | 2019 | 11500 |\n\n"
-        "Do NOT provide analysis or narrative — just the table."
-    )
-
+    # Phase 2: Concurrent SQL queries
+    instructions = _build_instructions(vector_ctx, schema_ctx, tables, extra_instructions)
+    log(f"PHASE 2 - {len(data_queries)} concurrent queries")
     t2 = time.time()
-    tasks = [ask(q["question"], enriched) for q in data_queries]
+    tasks = [ask(q["question"], instructions) for q in data_queries]
     raw_results = await asyncio.gather(*tasks, return_exceptions=True)
     phase2_time = time.time() - t2
 
-    results: list[dict] = []
+    results = []
     for i, r in enumerate(raw_results):
-        label = data_queries[i].get("label", f"Consulta {i + 1}")
+        label = data_queries[i].get("label", f"Consulta {i+1}")
         if isinstance(r, Exception):
             results.append({"question": label, "error": str(r)})
-            pipeline["phases"].append(_phase2_error_entry(label, str(r), phase2_time))
+            pipeline["phases"].append(_phase_entry(2, label, "answerDataQuestion", phase2_time, error=str(r)))
         else:
             results.append({**r, "question": label})
-            pipeline["phases"].append(_phase2_entry(label, r, phase2_time))
+            pipeline["phases"].append(_phase_entry(
+                2, label, "answerDataQuestion", phase2_time,
+                sql_query=get_sql(r), rows_returned=count_rows(r),
+            ))
 
-    # ── Extract chart data BEFORE Phase 3 overwrites the answers ──────────────
+    # Extract data from each result
     for r in results:
         if "error" not in r:
-            r["data"] = extract_chart_data(r)
-            log(f"CHART DATA for '{r.get('question','')[:40]}': {len(r['data'])} rows")
-            if r["data"]:
-                log(f"  keys: {list(r['data'][0].keys())}")
-            # Remove execution_result to keep JSON response small
+            r["data"] = extract_data(r)
             r.pop("execution_result", None)
 
-    # ── Phase 3: Thinking LLM interpretation for each result ──────────────────
-    log(f"PIPELINE PHASE 3 — Thinking LLM interpretation ({len(results)} results)")
+    # Phase 3: Parallel thinking LLM interpretation
+    log(f"PHASE 3 - Interpreting {len(results)} results")
     t3 = time.time()
-    async def _noop(text: str) -> str:
+
+    async def _noop(text):
         return text
 
     interp_tasks = []
     for r in results:
         if "error" not in r:
-            raw_answer = str(r.get("answer", ""))
-            structured_data = ""
+            raw = str(r.get("answer", ""))
+            structured = ""
             if r.get("data"):
-                import json
-                structured_data = "\nSTRUCTURED SQL RESULTS:\n"
-                structured_data += json.dumps(r["data"][:30], indent=2, ensure_ascii=False)
+                structured = f"\nSTRUCTURED DATA:\n{json.dumps(r['data'][:30], indent=2, ensure_ascii=False)}"
             interp_tasks.append(think_interpret(
                 question=r.get("question", user_question),
-                raw_data=raw_answer + structured_data,
-                sql=str(r.get("sql_query") or r.get("sqlQuery") or r.get("sql") or ""),
-                schema_context=schema_context,
+                raw_data=raw + structured,
+                sql=get_sql(r),
+                schema_context=schema_ctx,
             ))
         else:
             interp_tasks.append(_noop(r.get("error", "")))
 
     interpreted = await asyncio.gather(*interp_tasks, return_exceptions=True)
-    phase3_time = time.time() - t3
-
     for i, r in enumerate(results):
         if "error" not in r and not isinstance(interpreted[i], Exception):
             r["answer"] = interpreted[i]
 
-    total_time = time.time() - t_total
-    pipeline["total_duration_s"] = round(total_time, 1)
-    log(f"MULTI-PHASE PIPELINE COMPLETE ({total_time:.1f}s), {len(results)} results")
-    log("=" * 60)
+    total = time.time() - t_total
+    pipeline["total_duration_s"] = round(total, 1)
+    log(f"MULTI-PIPELINE COMPLETE ({total:.1f}s) {len(results)} results\n{'='*60}")
 
     return {"results": results, "pipeline": pipeline}
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# DeepQuery
-# ─────────────────────────────────────────────────────────────────────────────
+# ---- DeepQuery ----
 
 async def deep_query(question: str, extra_instructions: str = "") -> dict:
-    """
-    Call /deepQuery — the thinking model plans, executes multiple SQL queries
-    iteratively, reasons across results, and produces a comprehensive report.
-    """
-    log("=" * 70)
-    log("DEEP QUERY START")
-    log(f"Question: {question[:300]}")
-
+    log(f"DEEP QUERY: {question[:300]}")
     instructions = SYSTEM_INSTRUCTIONS
     if extra_instructions:
-        instructions += "\n\nADDITIONAL CONTEXT:\n" + extra_instructions
+        instructions += f"\n\nADDITIONAL CONTEXT:\n{extra_instructions}"
 
     t0 = time.time()
     result = await sdk_post(
@@ -511,41 +281,18 @@ async def deep_query(question: str, extra_instructions: str = "") -> dict:
         body={"question": question, "custom_instructions": instructions},
         timeout=TIMEOUT_DEEP,
     )
-    elapsed = time.time() - t0
+    log(f"DEEP QUERY done ({time.time()-t0:.1f}s)")
 
-    log(f"DEEP QUERY RESPONSE ({elapsed:.1f}s) keys={list(result.keys())}")
-    _log_deep_response(result)
-    log("=" * 70)
-
-    chart_data = extract_chart_data(result)
-    result.pop("execution_result", None)  # keep response small
-    return {**result, "data": chart_data}
-
-
-def _log_deep_response(result: dict) -> None:
-    if result.get("answer"):
-        answer = str(result["answer"])
-        log(f"ANSWER ({len(answer)} chars): {answer[:500]}")
-    if result.get("sql"):
-        log(f"SQL: {result['sql']}")
-    if result.get("queries"):
-        qs = result["queries"]
-        log(f"QUERIES executed ({len(qs)}):")
-        for idx, q in enumerate(qs):
-            if isinstance(q, dict):
-                log(f"  [{idx+1}] {str(q.get('question',''))[:120]}")
-                log(f"  [{idx+1}] sql: {str(q.get('sql',''))[:200]}")
-    if result.get("data") and isinstance(result["data"], list):
-        log(f"DATA: {len(result['data'])} rows")
+    data = extract_data(result)
+    result.pop("execution_result", None)
+    return {**result, "data": data}
 
 
 async def smart_query(question: str, extra: str = "") -> dict:
-    """Try deepQuery first; fall back to a standard data question on failure."""
-    log("smart_query() trying deepQuery first...")
     try:
         result = await deep_query(question, extra)
         log("smart_query() deepQuery succeeded")
         return result
     except Exception as exc:
-        log(f"smart_query() deepQuery failed ({exc}), falling back to ask()")
+        log(f"smart_query() deepQuery failed ({exc}), fallback to ask()")
         return await ask(question, extra)

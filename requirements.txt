@@ -3,3 +3,4 @@ uvicorn[standard]
 httpx
 jinja2
 xhtml2pdf
+matplotlib
