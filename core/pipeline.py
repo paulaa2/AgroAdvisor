@@ -317,22 +317,48 @@ async def two_phase_query(
     # Tell the LLM to focus on accurate SQL + clean data return; interpretation is Phase 3
     enriched += (
         "\n\nPHASE 2 ROLE: Your ONLY job is to generate the correct SQL query and execute it. "
-        "Return the raw data as a clean table. Do NOT provide analysis, recommendations "
-        "or narrative — that will be handled separately."
+        "CRITICAL RULES FOR DATA RETURN:\n"
+        "- NEVER use LIMIT 1. Always return at least 5-10 rows for comparison/trends.\n"
+        "- Use GROUP BY + ORDER BY to show rankings, trends over years, or multi-crop/country comparisons.\n"
+        "- If the user asks 'which is best,' show the TOP 5 so we can compare, not just the winner.\n"
+        "- If the user asks about a single crop/area, show its trend over multiple years.\n"
+        "- ALWAYS format the results as a Markdown table with headers, separator row, and data rows.\n"
+        "Example format:\n"
+        "| area | year | hg_ha_yield |\n"
+        "| --- | --- | --- |\n"
+        "| Brazil | 2018 | 11000 |\n"
+        "| Brazil | 2019 | 11500 |\n"
+        "| Brazil | 2020 | 12345 |\n\n"
+        "Do NOT provide analysis, recommendations or narrative — just the table."
     )
     t2 = time.time()
     data_result = await ask(data_question, enriched)
     phase2_time = time.time() - t2
     pipeline["phases"].append(_phase2_entry(data_question[:60], data_result, phase2_time))
 
+    # ── Extract structured data BEFORE Phase 3 overwrites the answer ──────────
+    chart_rows = extract_chart_data(data_result)
+    log(f"CHART DATA extracted: {len(chart_rows)} rows")
+    if chart_rows:
+        log(f"CHART DATA keys: {list(chart_rows[0].keys())}")
+        log(f"CHART DATA row 0: {chart_rows[0]}")
+
     # ── Phase 3: Thinking LLM deep interpretation ──────────────────────────────
     log("PIPELINE PHASE 3 — Thinking LLM interpretation")
     t3 = time.time()
     raw_answer = str(data_result.get("answer", ""))
-    sql_used   = str(data_result.get("sql_query") or data_result.get("sqlQuery") or data_result.get("sql") or "")
+
+    # Append structured JSON for deeper reasoning
+    structured_data = ""
+    if chart_rows:
+        import json
+        structured_data = "\nSTRUCTURED SQL RESULTS:\n"
+        structured_data += json.dumps(chart_rows[:30], indent=2, ensure_ascii=False)
+
+    sql_used = str(data_result.get("sql_query") or data_result.get("sqlQuery") or data_result.get("sql") or "")
     final_answer = await think_interpret(
         question=user_question,
-        raw_data=raw_answer,
+        raw_data=raw_answer + structured_data,
         sql=sql_used,
         schema_context=schema_context,
     )
@@ -343,8 +369,14 @@ async def two_phase_query(
     log(f"TWO-PHASE PIPELINE COMPLETE ({total_time:.1f}s)")
     log("=" * 60)
 
-    chart_data = extract_chart_data(data_result)
-    return {**data_result, "answer": final_answer, "pipeline": pipeline, "chart_data": chart_data}
+    # Build clean response — put chart rows in 'data' so frontend gets them directly
+    resp = {
+        "answer": final_answer,
+        "sql_query": sql_used,
+        "data": chart_rows,
+        "pipeline": pipeline,
+    }
+    return resp
 
 
 async def multi_phase_query(
@@ -379,7 +411,17 @@ async def multi_phase_query(
     # Phase 2 role: SQL generation + data retrieval only
     enriched += (
         "\n\nPHASE 2 ROLE: Your ONLY job is to generate the correct SQL query and execute it. "
-        "Return the raw data as a clean table. Do NOT provide analysis or narrative."
+        "CRITICAL RULES FOR DATA RETURN:\n"
+        "- NEVER use LIMIT 1. Always return at least 5-10 rows for comparison/trends.\n"
+        "- Use GROUP BY + ORDER BY to show rankings, trends over years, or multi-crop/country comparisons.\n"
+        "- If the user asks 'which is best,' show the TOP 5 so we can compare, not just the winner.\n"
+        "- ALWAYS format the results as a Markdown table with headers, separator row, and data rows.\n"
+        "Example format:\n"
+        "| area | year | hg_ha_yield |\n"
+        "| --- | --- | --- |\n"
+        "| Brazil | 2018 | 11000 |\n"
+        "| Brazil | 2019 | 11500 |\n\n"
+        "Do NOT provide analysis or narrative — just the table."
     )
 
     t2 = time.time()
@@ -397,6 +439,16 @@ async def multi_phase_query(
             results.append({**r, "question": label})
             pipeline["phases"].append(_phase2_entry(label, r, phase2_time))
 
+    # ── Extract chart data BEFORE Phase 3 overwrites the answers ──────────────
+    for r in results:
+        if "error" not in r:
+            r["data"] = extract_chart_data(r)
+            log(f"CHART DATA for '{r.get('question','')[:40]}': {len(r['data'])} rows")
+            if r["data"]:
+                log(f"  keys: {list(r['data'][0].keys())}")
+            # Remove execution_result to keep JSON response small
+            r.pop("execution_result", None)
+
     # ── Phase 3: Thinking LLM interpretation for each result ──────────────────
     log(f"PIPELINE PHASE 3 — Thinking LLM interpretation ({len(results)} results)")
     t3 = time.time()
@@ -406,9 +458,15 @@ async def multi_phase_query(
     interp_tasks = []
     for r in results:
         if "error" not in r:
+            raw_answer = str(r.get("answer", ""))
+            structured_data = ""
+            if r.get("data"):
+                import json
+                structured_data = "\nSTRUCTURED SQL RESULTS:\n"
+                structured_data += json.dumps(r["data"][:30], indent=2, ensure_ascii=False)
             interp_tasks.append(think_interpret(
                 question=r.get("question", user_question),
-                raw_data=str(r.get("answer", "")),
+                raw_data=raw_answer + structured_data,
                 sql=str(r.get("sql_query") or r.get("sqlQuery") or r.get("sql") or ""),
                 schema_context=schema_context,
             ))
@@ -426,10 +484,6 @@ async def multi_phase_query(
     pipeline["total_duration_s"] = round(total_time, 1)
     log(f"MULTI-PHASE PIPELINE COMPLETE ({total_time:.1f}s), {len(results)} results")
     log("=" * 60)
-
-    for r in results:
-        if "chart_data" not in r:
-            r["chart_data"] = extract_chart_data(r)
 
     return {"results": results, "pipeline": pipeline}
 
@@ -464,7 +518,8 @@ async def deep_query(question: str, extra_instructions: str = "") -> dict:
     log("=" * 70)
 
     chart_data = extract_chart_data(result)
-    return {**result, "chart_data": chart_data}
+    result.pop("execution_result", None)  # keep response small
+    return {**result, "data": chart_data}
 
 
 def _log_deep_response(result: dict) -> None:

@@ -85,8 +85,12 @@ async function sendChat() {
        <div class="bubble" id="${msgId}">${content}</div>`
     );
 
-    // Render charts — use server-side extracted chart_data (most reliable)
-    const chartData = data.chart_data || [];
+    // Render charts — use data array from server, fall back to client-side parse
+    let chartData = Array.isArray(data.data) && data.data.length >= 2 ? data.data : [];
+    if (chartData.length < 2 && typeof extractChartData === 'function') {
+      chartData = extractChartData(data);
+    }
+    console.log('[chat] chartData:', chartData.length, 'rows', chartData[0]);
     if (chartData.length >= 2) {
       const bubble = document.getElementById(msgId);
       if (bubble) {

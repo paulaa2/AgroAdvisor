@@ -290,13 +290,6 @@ async def market_intelligence():
             ),
             "label": "Correlacion petroleo-alimentos",
         },
-        {
-            "question": (
-                f"Which producing countries have the best yield trends for cash crops "
-                f"(coffee, tea, sugar)? Show top 5 with numbers. {_SQL_RULES_GLOBAL}"
-            ),
-            "label": "Mejores productores",
-        },
     ]
 
     async def _run():

@@ -218,6 +218,10 @@ function renderResult(r, idx) {
 
   let body = renderMd(answer);
   body += renderDataTable(r.data || []);
+
+  // Chart placeholder — will be populated after DOM insertion
+  body += `<div class="chart-section" id="chart-${idx}-${Date.now()}"></div>`;
+
   if (sql) {
     body += `<div class="result-sql">
       <details><summary>Ver SQL generada</summary>
@@ -247,7 +251,6 @@ function renderResult(r, idx) {
   </div>`;
 }
 
-/* ─── Results pane ───────────────────────────────────────────────────────────── */
 
 /**
  * Populate a results container with pipeline trace + result cards + PDF button.
@@ -272,17 +275,20 @@ function renderResults(container, data) {
   container.innerHTML = html;
 
   // Inject charts into each result card after HTML is in the DOM
-  if (typeof renderCharts === 'function' && typeof extractChartData === 'function') {
+  if (typeof renderCharts === 'function') {
     results.forEach((r, i) => {
-      const rowData = r.chart_data?.length >= 2 ? r.chart_data : extractChartData(r);
+      // Use r.data (backend-parsed rows) or fall back to client-side extraction
+      let rowData = Array.isArray(r.data) && r.data.length >= 2 ? r.data : [];
+      if (rowData.length < 2 && typeof extractChartData === 'function') {
+        rowData = extractChartData(r);
+      }
+      console.log(`[render] Result ${i}: ${rowData.length} chart rows`, rowData[0]);
       if (rowData.length < 2) return;
-      // Find the result card body at position i
       const cards = container.querySelectorAll('.result-card-body');
       const cardBody = cards[i];
       if (!cardBody) return;
-      const chartSection = document.createElement('div');
-      chartSection.className = 'chart-section';
-      cardBody.appendChild(chartSection);
+      const chartSection = cardBody.querySelector('.chart-section');
+      if (!chartSection) return;
       renderCharts(rowData, chartSection);
     });
   }

@@ -95,11 +95,19 @@ const _CHART_PALETTE = [
 /* ─── Column classification helpers ──────────────────────────── */
 
 const _YEAR_KEYS   = new Set(['year', 'año', 'anio']);
-const _CAT_KEYS    = new Set(['item', 'label', 'area', 'crop', 'cultivo', 'pais', 'country']);
+const _CAT_KEYS    = new Set(['item', 'label', 'area', 'crop', 'cultivo', 'pais', 'country',
+                               'crop_type', 'crop_name', 'country_name', 'region', 'name',
+                               'tipo', 'categoria', 'category', 'product', 'producto']);
 const _EXCLUDE_NUM = new Set(['id', 'year', 'año', 'anio']);
 
 function _isYear(k)     { return _YEAR_KEYS.has(k.toLowerCase()); }
-function _isCategory(k) { return _CAT_KEYS.has(k.toLowerCase()); }
+function _isCategory(k) {
+  const lk = k.toLowerCase();
+  if (_CAT_KEYS.has(lk)) return true;
+  // Auto-detect: columns ending in _type, _name, _label are likely categories
+  if (lk.endsWith('_type') || lk.endsWith('_name') || lk.endsWith('_label') || lk.endsWith('_category')) return true;
+  return false;
+}
 
 /** Return columns whose values look numeric, excluding _EXCLUDE_NUM keys. */
 function _numericCols(row, extraExclude = []) {
@@ -336,17 +344,29 @@ function _renderRadar(data, catCol, parentEl) {
  * @param {HTMLElement}   parentEl  DOM element to append charts into
  */
 function renderCharts(data, parentEl) {
+  console.log('[charts] renderCharts called, rows:', data?.length, 'Chart.js loaded:', typeof Chart !== 'undefined');
   if (!data?.length || typeof Chart === 'undefined') return;
   // Need at least 2 rows to make a meaningful chart
   if (data.length < 2) return;
 
   const sample  = data[0];
   const keys    = Object.keys(sample);
+  console.log('[charts] keys:', keys, 'first row:', sample);
   const yearCol = keys.find(_isYear);
-  const catCol  = keys.find(_isCategory);
+  let   catCol  = keys.find(_isCategory);
   const numCols = _numericCols(sample, yearCol ? [yearCol] : []);
+  console.log('[charts] yearCol:', yearCol, 'catCol:', catCol, 'numCols:', numCols);
 
   if (!numCols.length) return;
+
+  // Fallback: if no explicit category column found, try to detect string columns
+  if (!catCol && !yearCol) {
+    catCol = keys.find(k => {
+      if (_EXCLUDE_NUM.has(k.toLowerCase())) return false;
+      const v = sample[k];
+      return typeof v === 'string' && v.trim() !== '' && isNaN(parseFloat(v));
+    });
+  }
 
   try {
     if (yearCol) {

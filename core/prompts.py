@@ -239,6 +239,8 @@ No rigid sections or labels — just clear, flowing prose structured as follows:
 
 Do NOT use section headers like "A)", "B)", "Análisis", "Recomendaciones", etc.
 Do NOT end with a long list of bullet points — weave actions into the opening prose.
+Do NOT mention internal database table or view names (e.g. "yield_j_crop", "farm", "crop",
+"price_j_yield"). The user should never see technical schema details — just present the facts.
 
 ════════════════════════════════════════════════════════════════
 6. EXPERT DECISION RULES  (CRITICAL)

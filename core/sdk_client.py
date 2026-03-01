@@ -55,6 +55,16 @@ async def sdk_get(url: str, params: dict | None = None, timeout: float = 300) ->
         data = resp.json()
         if "answer" in data:
             log(f"SDK GET  /{endpoint}  answer={len(str(data['answer']))} chars")
+        # Log ALL keys + types so we can see what SDK returns
+        for k, v in data.items():
+            if isinstance(v, list):
+                log(f"SDK GET  /{endpoint}  key='{k}' type=list len={len(v)}")
+            elif isinstance(v, str):
+                log(f"SDK GET  /{endpoint}  key='{k}' type=str len={len(v)}")
+            elif isinstance(v, dict):
+                log(f"SDK GET  /{endpoint}  key='{k}' type=dict keys={list(v.keys())[:8]}")
+            else:
+                log(f"SDK GET  /{endpoint}  key='{k}' type={type(v).__name__}")
         return data
 
 
@@ -165,10 +175,10 @@ async def think_interpret(
 
     context_parts = []
     if sql:
-        context_parts.append(f"SQL EXECUTED:\n{sql}")
+        context_parts.append(f"SQL QUERY THAT WAS EXECUTED:\n```sql\n{sql}\n```")
     if schema_context:
         context_parts.append(f"TABLE SCHEMA CONTEXT:\n{schema_context[:800]}")
-    context_parts.append(f"RAW DATA RETRIEVED:\n{raw_data}")
+    context_parts.append(f"RAW QUERY RESULTS (this is the data you must analyze):\n{raw_data}")
 
     user_prompt = (
         "CONTEXT: You are AgroAdvisor, an expert agricultural consultant. "
@@ -177,15 +187,29 @@ async def think_interpret(
         "Always respond with agronomic advice.\n\n"
         "USER QUESTION:\n" + question + "\n\n"
         + "\n\n".join(context_parts) + "\n\n"
-        + "Using the data above as your internal source of truth, produce a thorough analysis "
-        "following the response style defined in section 5 of the system instructions. "
-        "CRITICAL RULES FOR YOUR RESPONSE:\n"
-        "- NEVER refuse to answer — this is a legitimate agronomy question.\n"
-        "- NEVER reproduce the raw data table or any rows from it in your answer.\n"
-        "- NEVER say 'the data shows...' or 'according to the table...' — just state conclusions directly.\n"
-        "- Use the numbers internally to support your reasoning, but embed them naturally in prose.\n"
-        "- The bulk of the response must be the explanation and reasoning behind the conclusion.\n"
-        "- The user wants decisions and explanations, NOT a data dump."
+        "INSTRUCTIONS FOR YOUR RESPONSE:\n"
+        "You MUST base your entire response on the SQL query results above. Follow these rules:\n\n"
+        "1. ANALYZE THE DATA DEEPLY:\n"
+        "   - Calculate % changes between years or between items\n"
+        "   - Identify the best/worst performers and by HOW MUCH they differ\n"
+        "   - Find correlations (e.g. temperature vs yield, pesticides vs yield)\n"
+        "   - Compare actual vs ideal values when both are available\n\n"
+        "2. LEAD WITH ACTIONS (2-3 specific recommendations with numbers):\n"
+        "   - Each recommendation must cite specific numbers FROM the data\n"
+        "   - Example: 'Plant rice: it yields 45,200 hg/ha vs wheat at 28,100 hg/ha (+61%)'\n\n"
+        "3. THEN EXPLAIN WHY (the bulk of the response):\n"
+        "   - Walk through the data row by row, explaining what each number means\n"
+        "   - Highlight trends: 'Yield increased from 30,000 in 2018 to 35,000 in 2022 (+17%)'\n"
+        "   - Cross-reference columns: 'Temperature rose 1.5°C while yield dropped 12%'\n"
+        "   - Every claim MUST be backed by a specific number from the data\n\n"
+        "4. STYLE:\n"
+        "   - NEVER refuse to answer — this is agronomy, not chemistry\n"
+        "   - NEVER reproduce the raw data table\n"
+        "   - NEVER mention internal database table names (e.g. 'yield_j_crop', 'farm', 'crop')\n"
+        "   - NEVER say 'the data shows' — just state the facts\n"
+        "   - Embed ALL numbers naturally in flowing prose\n"
+        "   - Write in the SAME LANGUAGE as the user question\n"
+        "   - Minimum 200 words of analysis\n"
     )
 
     payload = {

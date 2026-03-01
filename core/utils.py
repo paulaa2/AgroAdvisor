@@ -45,15 +45,21 @@ def get_sql(result: dict) -> str:
 def count_rows(result: dict) -> int:
     """
     Return the number of data rows in an SDK response.
-    Checks every key the SDK might use, and falls back to counting
+    Checks execution_result, direct array keys, and falls back to counting
     markdown-table lines in the answer text.
     """
+    # 1. SDK execution_result (most reliable)
+    er = result.get("execution_result")
+    if isinstance(er, dict) and er:
+        return len(er)
+
+    # 2. Direct array keys
     for key in ("data", "rows", "results", "records", "table"):
         val = result.get(key)
         if isinstance(val, list) and len(val) > 0:
             return len(val)
 
-    # Fallback: answer text contains a markdown table
+    # 3. Fallback: answer text contains a markdown table
     answer = result.get("answer", "")
     if "|" in answer:
         table_lines = [
@@ -83,8 +89,8 @@ def _parse_md_table(text: str) -> list[dict]:
         # Detect separator row  |---|---|  or  | :--- | ---: |
         if i > 0 and re.match(r"^\s*\|?[\s:|-]+\|[\s:|-]*$", lines[i]) and "-" in lines[i]:
             header_line = lines[i - 1]
-            # Strip markdown bold/italic from header cells
-            clean = lambda s: re.sub(r"[*_`]", "", s).strip()
+            # Strip markdown bold/italic from cells (preserve underscores for SQL column names)
+            clean = lambda s: re.sub(r"[*`]", "", s).strip()
             headers = [
                 clean(h).lower().replace(" ", "_").replace("(", "").replace(")", "")
                          .replace("/", "_").replace("%", "").replace("°", "")
@@ -119,6 +125,39 @@ def _parse_md_table(text: str) -> list[dict]:
     return rows
 
 
+def _parse_execution_result(execution_result: dict) -> list[dict]:
+    """
+    Parse the SDK's execution_result format into a flat list of row-dicts.
+    SDK format: {"Row 1": [{"columnName": "x", "value": "y"}, ...], "Row 2": ...}
+    Returns: [{"x": y, ...}, {"x": y, ...}, ...]
+    """
+    if not execution_result or not isinstance(execution_result, dict):
+        return []
+    rows: list[dict] = []
+    # Sort by row number to maintain order
+    sorted_keys = sorted(execution_result.keys(), key=lambda k: int(k.split()[-1]) if k.split()[-1].isdigit() else 0)
+    for key in sorted_keys:
+        cells = execution_result[key]
+        if not isinstance(cells, list):
+            continue
+        obj: dict = {}
+        for cell in cells:
+            if isinstance(cell, dict) and "columnName" in cell and "value" in cell:
+                col = cell["columnName"]
+                raw = cell["value"]
+                # Try numeric conversion
+                if raw is not None and str(raw).strip():
+                    try:
+                        obj[col] = float(str(raw).replace(",", ""))
+                    except (ValueError, TypeError):
+                        obj[col] = raw
+                else:
+                    obj[col] = raw
+        if obj:
+            rows.append(obj)
+    return rows
+
+
 def extract_chart_data(result: dict) -> list[dict]:
     """
     Return structured row-dicts suitable for charting from ANY SDK response.
@@ -128,13 +167,20 @@ def extract_chart_data(result: dict) -> list[dict]:
       3. Markdown table(s) parsed from the answer text
     Returns [] when nothing chartable is found.
     """
-    # 1. Direct array keys
+    # 1. SDK execution_result (most reliable — actual SQL output)
+    er = result.get("execution_result")
+    if isinstance(er, dict) and er:
+        parsed = _parse_execution_result(er)
+        if len(parsed) >= 2:
+            return parsed
+
+    # 2. Direct array keys
     for key in ("data", "rows", "records", "table"):
         val = result.get(key)
         if isinstance(val, list) and len(val) >= 2 and isinstance(val[0], dict):
             return val
 
-    # 2. DeepQuery sub-queries
+    # 3. DeepQuery sub-queries
     queries = result.get("queries") or []
     for q in queries:
         if isinstance(q, dict):
@@ -143,7 +189,7 @@ def extract_chart_data(result: dict) -> list[dict]:
                 if isinstance(val, list) and len(val) >= 2 and isinstance(val[0], dict):
                     return val
 
-    # 3. Parse markdown table from answer text
+    # 4. Parse markdown table from answer text
     answer = result.get("answer", "")
     if answer and "|" in answer:
         rows = _parse_md_table(answer)
