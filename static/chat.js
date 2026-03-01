@@ -20,15 +20,15 @@ async function sendChat() {
   const modeLabel = chatMode === 'deep' ? 'DeepQuery' : 'Pipeline';
 
   _appendMsg(msgs, 'user',
-    <div class="avatar av-user"> + USER_AVATAR + </div>
-     <div class="bubble"> + esc(question) + </div>);
+    '<div class="avatar av-user">' + USER_AVATAR + '</div>' +
+    '<div class="bubble">' + esc(question) + '</div>');
 
   const loadId = 'ld-' + Date.now();
   _appendMsg(msgs, 'bot',
-    <div class="avatar av-bot" id=" + loadId + -av"> + BOT_AVATAR + </div>
-     <div class="bubble" id=" + loadId + ">
-       <div class="loading-indicator"><div class="spinner"></div><span> + modeLabel + : Analizando...</span></div>
-     </div>, loadId + '-wrap');
+    '<div class="avatar av-bot" id="' + loadId + '-av">' + BOT_AVATAR + '</div>' +
+    '<div class="bubble" id="' + loadId + '">' +
+      '<div class="loading-indicator"><div class="spinner"></div><span>' + modeLabel + ': Analizando...</span></div>' +
+    '</div>', loadId + '-wrap');
   msgs.scrollTop = msgs.scrollHeight;
 
   try {
