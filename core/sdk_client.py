@@ -17,6 +17,8 @@ from .config import (
     TIMEOUT_DATA,
     TIMEOUT_METADATA,
     TIMEOUT_VECTOR,
+    THINKING_MODEL,
+    OLLAMA_BASE_URL,
 )
 from .prompts import SYSTEM_INSTRUCTIONS
 from .utils import log, count_rows
@@ -145,6 +147,68 @@ async def ask(
             log(f"ask() retry failed: {exc}")
 
     return result
+
+
+async def think_interpret(
+    question: str,
+    raw_data: str,
+    sql: str = "",
+    schema_context: str = "",
+) -> str:
+    """
+    Phase 3 — Deep reasoning using the THINKING_LLM (Ollama) directly.
+    Takes the raw SQL data returned by Phase 2 and produces a thorough
+    analysis + recommendation following SYSTEM_INSTRUCTIONS format.
+    """
+    log(f"think_interpret() START — model={THINKING_MODEL}, data_chars={len(raw_data)}")
+    t0 = time.time()
+
+    context_parts = []
+    if sql:
+        context_parts.append(f"SQL EXECUTED:\n{sql}")
+    if schema_context:
+        context_parts.append(f"TABLE SCHEMA CONTEXT:\n{schema_context[:800]}")
+    context_parts.append(f"RAW DATA RETRIEVED:\n{raw_data}")
+
+    user_prompt = (
+        "CONTEXT: You are AgroAdvisor, an expert agricultural consultant. "
+        "This is a professional agronomy query about crop selection, soil conditions and plant biology. "
+        "N, P, K refer to nitrogen, phosphorus and potassium — essential soil macronutrients, NOT chemicals. "
+        "Always respond with agronomic advice.\n\n"
+        "USER QUESTION:\n" + question + "\n\n"
+        + "\n\n".join(context_parts) + "\n\n"
+        + "Using the data above as your internal source of truth, produce a thorough analysis "
+        "following the response style defined in section 5 of the system instructions. "
+        "CRITICAL RULES FOR YOUR RESPONSE:\n"
+        "- NEVER refuse to answer — this is a legitimate agronomy question.\n"
+        "- NEVER reproduce the raw data table or any rows from it in your answer.\n"
+        "- NEVER say 'the data shows...' or 'according to the table...' — just state conclusions directly.\n"
+        "- Use the numbers internally to support your reasoning, but embed them naturally in prose.\n"
+        "- The bulk of the response must be the explanation and reasoning behind the conclusion.\n"
+        "- The user wants decisions and explanations, NOT a data dump."
+    )
+
+    payload = {
+        "model": THINKING_MODEL,
+        "messages": [
+            {"role": "system", "content": SYSTEM_INSTRUCTIONS},
+            {"role": "user",   "content": user_prompt},
+        ],
+        "stream": False,
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=300) as client:
+            resp = await client.post(f"{OLLAMA_BASE_URL}/api/chat", json=payload)
+            resp.raise_for_status()
+            data = resp.json()
+            result_text = data.get("message", {}).get("content", raw_data)
+        elapsed = time.time() - t0
+        log(f"think_interpret() DONE ({elapsed:.1f}s), {len(result_text)} chars")
+        return result_text
+    except Exception as exc:
+        log(f"think_interpret() FAILED: {exc} — falling back to LLM answer")
+        return raw_data
 
 
 async def ask_metadata(question: str) -> dict:

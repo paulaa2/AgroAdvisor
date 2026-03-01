@@ -34,10 +34,32 @@ function renderMd(text) {
 /* ─── Pipeline trace ───────────────────────────────────────────────────────── */
 
 const _PHASE_CLASSES = {
-  0: { step: 'phase-0', badge: 'sp-0', label: 'Fase 0 — VectorDB' },
-  1: { step: 'phase-1', badge: 'sp-1', label: 'Fase 1 — Metadata' },
-  2: { step: 'phase-2', badge: 'sp-2', label: 'Fase 2 — Data'     },
+  0: { step: 'phase-0', badge: 'sp-0', label: 'Fase 0 — Ranking' },
+  1: { step: 'phase-1', badge: 'sp-1', label: 'Fase 1 — Selección' },
+  2: { step: 'phase-2', badge: 'sp-2', label: 'Fase 2 — Datos' },
 };
+
+/**
+ * Build the HTML for a single pipeline step.
+ * @param {object} p  Phase entry from the backend pipeline object
+ * @returns {string}
+ */
+/**
+ * Render a row of table-name chips (for ranked_tables or selected_tables).
+ * @param {Array} tables
+ * @param {string} chipClass  CSS class for the chip
+ */
+function _renderTableChips(tables, chipClass) {
+  if (!tables?.length) return '';
+  const chips = tables.map(t => {
+    const name  = typeof t === 'string' ? t : t.name;
+    const score = typeof t === 'object' && t.score != null ? ` · ${t.score}` : '';
+    const tip   = typeof t === 'object' && t.description ? t.description : '';
+    const color = typeof t === 'object' && t.denodo === false ? ' chip-local' : '';
+    return `<span class="table-chip ${chipClass}${color}" title="${esc(tip)}">${esc(name)}${esc(score)}</span>`;
+  }).join('');
+  return `<div class="step-chips">${chips}</div>`;
+}
 
 /**
  * Build the HTML for a single pipeline step.
@@ -50,20 +72,60 @@ function _renderPhaseStep(p) {
   const time     = p.duration_s ? `${p.duration_s}s` : '';
 
   let detail = '';
-  if (p.result_summary) {
-    const summary = p.result_summary.length > 250
-      ? p.result_summary.slice(0, 250) + '…'
-      : p.result_summary;
-    detail += `<div class="step-detail">Esquema descubierto: ${esc(summary)}</div>`;
+
+  // Phase 0: ranked table list
+  if (p.ranked_tables?.length) {
+    const visible = p.ranked_tables.filter(t => t.score > 0).slice(0, 6);
+    if (visible.length) {
+      detail += `<div class="step-detail step-detail-label">Tablas candidatas (score > 0):</div>`;
+      detail += _renderTableChips(visible, 'chip-ranked');
+    }
   }
+
+  // Phase 1: selected tables
+  if (p.selected_tables?.length) {
+    detail += `<div class="step-detail step-detail-label">Tablas seleccionadas:</div>`;
+    detail += _renderTableChips(p.selected_tables, 'chip-selected');
+  }
+
+  // result_summary — show full text in a collapsible if long
+  if (p.result_summary) {
+    const full = p.result_summary;
+    const short = full.length > 160 ? full.slice(0, 160) + '…' : full;
+    const id = 'ps-' + Math.random().toString(36).slice(2, 8);
+    if (full.length > 160) {
+      detail += `<div class="step-detail">
+        <span id="${id}-s">${esc(short)}
+          <a href="#" class="step-expand" onclick="
+            document.getElementById('${id}-s').style.display='none';
+            document.getElementById('${id}-f').style.display='block';
+            return false;">ver más</a>
+        </span>
+        <span id="${id}-f" style="display:none">${esc(full)}
+          <a href="#" class="step-expand" onclick="
+            document.getElementById('${id}-s').style.display='block';
+            document.getElementById('${id}-f').style.display='none';
+            return false;">ver menos</a>
+        </span>
+      </div>`;
+    } else {
+      detail += `<div class="step-detail">${esc(short)}</div>`;
+    }
+  }
+
+  // rows / data feedback
   if (p.rows_returned > 0) {
-    detail += `<div class="step-detail">${p.rows_returned} filas obtenidas</div>`;
+    detail += `<div class="step-detail step-ok">${p.rows_returned} filas obtenidas</div>`;
   } else if (p.rows_returned === 0 && phaseNum === 2) {
     detail += `<div class="step-detail" style="color:var(--n-400)">Datos integrados en la respuesta</div>`;
   }
+
+  // SQL
   if (p.sql_query) {
     detail += `<div class="step-sql">${esc(p.sql_query)}</div>`;
   }
+
+  // Errors
   if (p.error) {
     detail += `<div class="step-detail" style="color:var(--red)">Error: ${esc(p.error)}</div>`;
   }
@@ -84,17 +146,34 @@ function _renderPhaseStep(p) {
  * @param {object|null} pipeline  The `pipeline` key from an API response
  * @returns {string}  HTML string (empty if no pipeline data)
  */
-function renderPipeline(pipeline) {
+/**
+ * Render the full pipeline trace as a collapsible block.
+ * Starts collapsed to save space; user can expand to see all steps.
+ * @param {object|null} pipeline
+ * @param {boolean} [startOpen=false]
+ * @returns {string}
+ */
+function renderPipeline(pipeline, startOpen = false) {
   if (!pipeline?.phases?.length) return '';
-  const total = pipeline.total_duration_s ?? 0;
-  const steps = pipeline.phases.map(_renderPhaseStep).join('');
+  const total      = pipeline.total_duration_s ?? 0;
+  const steps      = pipeline.phases.map(_renderPhaseStep).join('');
+  const phase2n    = pipeline.phases.filter(p => p.phase === 2).length;
+  const openAttr   = startOpen ? ' open' : '';
 
-  return `<details class="pipeline-trace" open>
+  // Build a one-line summary of selected tables (from Phase 1 entry)
+  const p1 = pipeline.phases.find(p => p.phase === 1);
+  const selNames = p1?.selected_tables?.join(', ') || '';
+  const selBadge = selNames
+    ? `<span class="pipeline-label pl-table">${esc(selNames)}</span>`
+    : '';
+
+  return `<details class="pipeline-trace"${openAttr}>
     <summary>
       <svg class="chevron" width="14" height="14" viewBox="0 0 24 24" fill="none"
            stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
       Pipeline de razonamiento
-      <span class="pipeline-label pl-ok">${pipeline.phases.length} pasos</span>
+      ${selBadge}
+      <span class="pipeline-label pl-ok">${pipeline.phases.length} pasos · ${phase2n} consulta${phase2n !== 1 ? 's' : ''}</span>
       <span class="pipeline-label pl-time">${total}s total</span>
     </summary>
     <div class="pipeline-steps">${steps}</div>
@@ -146,7 +225,10 @@ function renderResult(r, idx) {
       </details></div>`;
   }
 
-  return `<div class="result-card">
+  const _encAttr = s => s.replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/\n/g,'&#10;').replace(/\r/g,'');
+  return `<div class="result-card"
+    data-answer="${_encAttr(answer)}"
+    data-sql="${_encAttr(sql)}">
     <div class="result-card-head"
          onclick="this.nextElementSibling.style.display=
                   this.nextElementSibling.style.display==='none'?'block':'none'">
@@ -182,15 +264,28 @@ function renderResults(container, data) {
   }
 
   let html = '';
-  if (data.pipeline) html += renderPipeline(data.pipeline);
+  if (data.pipeline) html += renderPipeline(data.pipeline, true);
 
-  if (data.results?.length) {
-    html += data.results.map((r, i) => renderResult(r, i)).join('');
-  } else if (data.answer) {
-    html += renderResult(data, 0);
-  }
+  const results = data.results?.length ? data.results : (data.answer ? [data] : []);
+  results.forEach((r, i) => { html += renderResult(r, i); });
 
   container.innerHTML = html;
+
+  // Inject charts into each result card after HTML is in the DOM
+  if (typeof renderCharts === 'function' && typeof extractChartData === 'function') {
+    results.forEach((r, i) => {
+      const rowData = r.chart_data?.length >= 2 ? r.chart_data : extractChartData(r);
+      if (rowData.length < 2) return;
+      // Find the result card body at position i
+      const cards = container.querySelectorAll('.result-card-body');
+      const cardBody = cards[i];
+      if (!cardBody) return;
+      const chartSection = document.createElement('div');
+      chartSection.className = 'chart-section';
+      cardBody.appendChild(chartSection);
+      renderCharts(rowData, chartSection);
+    });
+  }
 
   const btn = document.createElement('button');
   btn.className = 'btn-primary';

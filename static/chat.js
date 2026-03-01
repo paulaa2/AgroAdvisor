@@ -64,17 +64,38 @@ async function sendChat() {
     // Remove loading placeholder
     document.getElementById(loadId + '-wrap')?.remove();
 
-    const answer = data.answer || data.error || 'No se pudo obtener respuesta.';
-    let content  = '';
+    // ── Pipeline trace — rendered OUTSIDE the bubble so it's always fully visible ──
+    if (data.pipeline) {
+      const pipeDiv = document.createElement('div');
+      pipeDiv.className = 'msg bot pipeline-msg';
+      pipeDiv.innerHTML =
+        `<div class="avatar av-bot">${BOT_AVATAR}</div>` +
+        `<div class="pipeline-outer">${renderPipeline(data.pipeline, true)}</div>`;
+      msgs.appendChild(pipeDiv);
+    }
 
-    if (data.pipeline) content += renderPipeline(data.pipeline);
-    content += renderMd(answer);
+    // ── Answer bubble ─────────────────────────────────────────────────────────
+    const answer = data.answer || data.error || 'No se pudo obtener respuesta.';
+    let content  = renderMd(answer);
     content += renderDataTable((data.data || []).slice(0, 20));
 
+    const msgId = 'msg-' + Date.now();
     _appendMsg(msgs, 'bot',
       `<div class="avatar av-bot">${BOT_AVATAR}</div>
-       <div class="bubble">${content}</div>`
+       <div class="bubble" id="${msgId}">${content}</div>`
     );
+
+    // Render charts — use server-side extracted chart_data (most reliable)
+    const chartData = data.chart_data || [];
+    if (chartData.length >= 2) {
+      const bubble = document.getElementById(msgId);
+      if (bubble) {
+        const chartSection = document.createElement('div');
+        chartSection.className = 'chart-section';
+        bubble.appendChild(chartSection);
+        renderCharts(chartData, chartSection);
+      }
+    }
   } catch (e) {
     document.getElementById(loadId + '-wrap')?.remove();
     _appendMsg(msgs, 'bot',

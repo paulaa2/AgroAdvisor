@@ -92,14 +92,14 @@ function runRegionalReport() {
  */
 async function downloadSectionPDF(question, btnEl) {
   const section = btnEl.closest('.result-card');
-  const body    = section?.querySelector('.result-card-body');
-  const answer  = body ? body.innerHTML : '';
+  const answer  = section?.dataset.answer || '';
+  const sql     = section?.dataset.sql    || '';
   toast('Generando PDF…', 'info', 3000);
   try {
     const res = await fetch('/api/report', {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ title: 'Informe AgroAdvisor', question, answer }),
+      body:    JSON.stringify({ title: 'Informe AgroAdvisor', question, sections: [{ heading: question, content: answer, sql }] }),
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));

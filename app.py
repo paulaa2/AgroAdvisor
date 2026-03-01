@@ -142,6 +142,25 @@ async def crop_advisor(area: str = "", conditions: str = ""):
     area_ctx = f" in {area}" if area else ""
     cond_ctx = f" given conditions: {conditions}" if conditions else ""
 
+    # Phase 2 question: always just fetch all crop ideal conditions (simple SQL).
+    # The user's free-text conditions are passed as the label so think_interpret
+    # (Phase 3) can match them against the returned data — no complex SQL needed.
+    conditions_question = (
+        f"Query the 'crop' table and return ALL rows with label, temperature, humidity, "
+        f"rainfall, ph, n, p, k. Do NOT filter — return the complete table so all crops "
+        f"can be compared. {_SQL_RULES_AREA}"
+    )
+    # The label becomes the question that think_interpret sees, so include the user conditions there.
+    if conditions:
+        conditions_label = (
+            f"Condiciones del terreno: '{conditions}'{area_ctx}. "
+            f"Usando la tabla de condiciones ideales de cultivo (temperatura en grados, humedad relativa, "
+            f"lluvia anual, pH del suelo y macronutrientes), identifica los cultivos que mejor se adaptan "
+            f"a esas condiciones y recomienda cuáles plantar."
+        )
+    else:
+        conditions_label = f"Condiciones ideales de cultivo{area_ctx}"
+
     queries = [
         {
             "question": (
@@ -151,11 +170,8 @@ async def crop_advisor(area: str = "", conditions: str = ""):
             "label": f"Rendimiento de cultivos{area_ctx}",
         },
         {
-            "question": (
-                f"What are the ideal growing conditions (temperature, humidity, rainfall, "
-                f"pH, N, P, K) for the main crops grown{area_ctx}?{cond_ctx} {_SQL_RULES_AREA}"
-            ),
-            "label": "Condiciones ideales de cultivo",
+            "question": conditions_question,
+            "label": conditions_label,
         },
         {
             "question": (
@@ -365,7 +381,7 @@ body { font-family: Helvetica, Arial, sans-serif; color: #1a1a2e; font-size: 12p
 .question { background: #f0faf4; border-left: 4px solid #2d6a4f; padding: 10px 14px; font-style: italic; }
 .answer { text-align: justify; }
 pre { background: #f5f5f5; padding: 10px; font-size: 10px; white-space: pre-wrap; }
-table { width: 100%%; border-collapse: collapse; font-size: 10px; margin-top: 6px; }
+table { width: 100%; border-collapse: collapse; font-size: 10px; margin-top: 6px; }
 th { background: #2d6a4f; color: #fff; padding: 6px 8px; text-align: left; }
 td { padding: 5px 8px; border-bottom: 1px solid #e0e0e0; }
 .footer { margin-top: 30px; border-top: 1px solid #e0e0e0; padding-top: 10px; font-size: 9px; color: #999; text-align: center; }

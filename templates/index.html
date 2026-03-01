@@ -10,6 +10,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/style.css">
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 </head>
 <body>
 
@@ -150,7 +151,7 @@
     <div class="form-card">
       <div class="form-grid">
         <div class="field"><label for="crop-area">Pais / Region</label><input id="crop-area" type="text" placeholder="Ej: India, Brazil, Spain..."></div>
-        <div class="field field-wide"><label for="crop-conditions">Condiciones (opcional)</label><input id="crop-conditions" type="text" placeholder="Ej: 25C, 900mm lluvia, suelo acido..."></div>
+        <div class="field field-wide"><label for="crop-conditions">Condiciones (opcional)</label><input id="crop-conditions" type="text" placeholder="Ej: mucho calor y humedad, suelo ácido, poca lluvia, 28°C..."></div>
       </div>
       <button class="btn-primary" onclick="runCropAdvisor()">Ejecutar analisis</button>
     </div>
@@ -197,6 +198,7 @@
 </main>
 
 <script src="/static/render.js"></script>
+<script src="/static/charts.js"></script>
 <script src="/static/api.js"></script>
 <script src="/static/chat.js"></script>
 <script src="/static/main.js"></script>
